@@ -1,0 +1,222 @@
+name: overtone-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-overtone}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-overtone_local}
+      POSTGRES_DB: ${POSTGRES_DB:-overtone}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:-redis_local}
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - noeviction
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    mem_limit: 160m
+    cpus: 0.2
+    healthcheck:
+      test: [CMD, redis-cli, -a, '${REDIS_PASSWORD:-redis_local}', ping]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ':9001'
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - "127.0.0.1:${S3_PORT:-9000}:9000"
+      - "127.0.0.1:${S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: [CMD, mc, ready, local]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-medical-scribe}
+    entrypoint: >-
+      /bin/sh -c '
+      mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}";
+      mc mb --ignore-existing "local/$${S3_BUCKET}";
+      '
+    restart: "no"
+
+  api:
+    build:
+      context: ../overtone
+      dockerfile: backend/Dockerfile
+      target: backend
+    restart: unless-stopped
+    env_file: ../overtone/backend/.env
+    environment: &overtone_environment
+      DATABASE_URL: ${DATABASE_URL:-postgresql://overtone:overtone_local@postgres:5432/overtone}
+      REDIS_URL: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_local}
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-medical-scribe}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+      INFERENCE_GRPC_ADDRESS: inference:50051
+      INFERENCE_GRPC_TLS: "false"
+    ports:
+      - "${API_PORT:-3000}:3000"
+    volumes:
+      - recordings_data:/app/recordings
+    mem_limit: 384m
+    cpus: 0.4
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -qO-, http://localhost:3000/api/health]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ../overtone
+      dockerfile: backend/Dockerfile
+      target: frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    mem_limit: 64m
+    cpus: 0.1
+    depends_on:
+      api:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ../overtone
+      dockerfile: backend/Dockerfile
+      target: backend
+    command: [node, dist/worker/main.js]
+    restart: unless-stopped
+    stop_grace_period: 45s
+    env_file: ../overtone/backend/.env
+    environment:
+      <<: *overtone_environment
+      DATABASE_URL: ${WORKER_DATABASE_URL:-postgresql://overtone:overtone_local@postgres:5432/overtone}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  inference-mock:
+    profiles: [mock]
+    build:
+      context: ../medical-scribe
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: ../medical-scribe/.env
+    environment: &inference_environment
+      MEDSCRIBE_EXECUTION_MODE: mock
+      MEDSCRIBE_DATABASE_URL: ${MEDSCRIBE_DATABASE_URL:-postgresql://overtone:overtone_local@postgres:5432/overtone}
+      MEDSCRIBE_S3_ENDPOINT: http://minio:9000
+      MEDSCRIBE_S3_BUCKET: ${S3_BUCKET:-medical-scribe}
+      MEDSCRIBE_S3_REGION: ${S3_REGION:-us-east-1}
+      MEDSCRIBE_S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MEDSCRIBE_S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - "127.0.0.1:${INFERENCE_PORT:-50051}:50051"
+    networks:
+      default:
+        aliases: [inference]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  inference-gpu:
+    profiles: [gpu]
+    build:
+      context: ../medical-scribe
+      dockerfile: Dockerfile.gpu
+    restart: unless-stopped
+    env_file: ../medical-scribe/.env
+    environment:
+      <<: *inference_environment
+      MEDSCRIBE_EXECUTION_MODE: gpu
+    ports:
+      - "127.0.0.1:${INFERENCE_PORT:-50051}:50051"
+    volumes:
+      - ${MEDSCRIBE_MODELS_DIR:-../medical-scribe/models}:/models
+    networks:
+      default:
+        aliases: [inference]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+networks:
+  default:
+    name: overtone-network
+
+volumes:
+  postgres_data:
+    name: backend_postgres_data
+  redis_data:
+    name: backend_redis_data
+  minio_data:
+    name: backend_minio_data
+  recordings_data:
+    name: backend_recordings_data
