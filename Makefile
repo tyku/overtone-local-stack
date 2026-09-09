@@ -7,7 +7,7 @@ BUILD_SERVICES ?=
 UP_SERVICES ?=
 SERVICE ?=
 
-.PHONY: up up-gpu _up infra app build down logs ps config
+.PHONY: up up-gpu _up infra app frontend build down logs ps config
 
 up:
 	@$(MAKE) _up PROFILE=mock OTHER_PROFILE=gpu
@@ -27,7 +27,12 @@ infra:
 	@$(COMPOSE) up $(UP_FLAGS) postgres redis minio minio-init
 
 app:
-	@$(COMPOSE) up $(UP_FLAGS) api frontend worker
+	@$(COMPOSE) up $(UP_FLAGS) api worker frontend-assets nginx
+
+frontend:
+	@$(COMPOSE) build $(BUILD_FLAGS) frontend-assets
+	@$(COMPOSE) rm -f frontend-assets >/dev/null 2>&1 || true
+	@$(COMPOSE) up $(UP_FLAGS) frontend-assets nginx
 
 build:
 	@$(COMPOSE) --profile $(PROFILE) build $(BUILD_FLAGS) $(BUILD_SERVICES)

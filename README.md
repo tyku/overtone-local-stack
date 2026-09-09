@@ -16,7 +16,8 @@ make up
 make up                 # весь стек с mock inference
 make up-gpu             # весь стек с GPU inference
 make infra              # только PostgreSQL, Redis и MinIO
-make app                # API, frontend и worker
+make app                # API, worker, frontend assets и Nginx
+make frontend           # пересобрать React assets и запустить Nginx
 make logs               # логи всех сервисов
 make logs SERVICE=worker
 make ps
@@ -51,3 +52,27 @@ make config PROFILE=gpu
 Mock и GPU inference взаимоисключающие. `make up` и `make up-gpu` автоматически
 останавливают контейнер другого режима. Существующие volumes сохранены под
 старыми именами `backend_*`. Команда `make down` данные не удаляет.
+
+## Frontend и Nginx
+
+React-приложение собирается внутри Docker сервисом `frontend-assets`. Это
+одноразовый контейнер: он очищает только named volume `frontend_dist`, копирует
+в него production build и успешно завершается. Постоянный сервис `nginx`
+монтирует этот volume только для чтения, раздаёт SPA и проксирует `/api/*` в
+`api:3000`.
+
+Nginx не входит во frontend-модуль. Его локальная infrastructure-конфигурация
+находится в `nginx/nginx.conf`; позднее её можно перенести в отдельный infra
+репозиторий. TLS и доменная маршрутизация в локальном стеке не настраиваются.
+
+Для production-like проверки:
+
+```sh
+make frontend
+curl http://localhost:${FRONTEND_PORT:-8080}/nginx-health
+curl http://localhost:${FRONTEND_PORT:-8080}/api/health
+```
+
+Для принудительного обновления assets в составе всего стека используйте
+`make up REBUILD=1` или `make up-gpu REBUILD=1`. Старые hashed assets удаляются
+из `frontend_dist` перед копированием новой сборки.
