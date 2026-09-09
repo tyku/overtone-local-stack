@@ -208,7 +208,7 @@ services:
               capabilities: [gpu]
 
 networks:
-  default:
+  overtone-network:
     name: overtone-network
 
 volumes:
