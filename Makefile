@@ -7,7 +7,7 @@ BUILD_SERVICES ?=
 UP_SERVICES ?=
 SERVICE ?=
 
-.PHONY: up up-gpu _up infra api app frontend frontend-dev smoke-overtone deploy-overtone build down logs ps config
+.PHONY: up up-gpu _up infra api app frontend frontend-dev smoke-overtone deploy-overtone build down purge logs ps config
 
 up:
 	@$(MAKE) _up PROFILE=mock OTHER_PROFILE=gpu
@@ -52,6 +52,9 @@ build:
 
 down:
 	@$(COMPOSE) --profile mock --profile gpu down
+
+purge:
+	@$(COMPOSE) --profile mock --profile gpu down --rmi all --remove-orphans
 
 logs:
 	@$(COMPOSE) --profile mock --profile gpu logs -f $(SERVICE)

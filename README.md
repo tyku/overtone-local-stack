@@ -25,6 +25,7 @@ make logs               # логи всех сервисов
 make logs SERVICE=worker
 make ps
 make down
+make purge              # удалить контейнеры и образы, сохранив volumes
 ```
 
 По умолчанию `make up` использует существующие образы. Для пересборки:
@@ -54,7 +55,9 @@ make config PROFILE=gpu
 
 Mock и GPU inference взаимоисключающие. `make up` и `make up-gpu` автоматически
 останавливают контейнер другого режима. Существующие volumes сохранены под
-старыми именами `backend_*`. Команда `make down` данные не удаляет.
+старыми именами `backend_*`. Команды `make down` и `make purge` данные не
+удаляют: `purge` удаляет контейнеры, сеть и связанные образы, но сохраняет
+volumes.
 
 ## Frontend и Nginx
 
