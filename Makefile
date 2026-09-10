@@ -7,7 +7,7 @@ BUILD_SERVICES ?=
 UP_SERVICES ?=
 SERVICE ?=
 
-.PHONY: up up-gpu _up infra app frontend smoke-overtone build down logs ps config
+.PHONY: up up-gpu _up infra api app frontend frontend-dev smoke-overtone deploy-overtone build down logs ps config
 
 up:
 	@$(MAKE) _up PROFILE=mock OTHER_PROFILE=gpu
@@ -26,6 +26,9 @@ _up:
 infra:
 	@$(COMPOSE) up $(UP_FLAGS) postgres redis minio minio-init
 
+api:
+	@$(COMPOSE) up -d --wait api
+
 app:
 	@$(COMPOSE) up $(UP_FLAGS) api worker frontend-assets nginx
 
@@ -34,8 +37,15 @@ frontend:
 	@$(COMPOSE) rm -f frontend-assets >/dev/null 2>&1 || true
 	@$(COMPOSE) up $(UP_FLAGS) frontend-assets nginx
 
+frontend-dev:
+	@$(COMPOSE) up -d --wait api
+	@cd ../overtone/frontend && npm run dev
+
 smoke-overtone:
 	@sh ./scripts/smoke-overtone.sh
+
+deploy-overtone:
+	@sh ./scripts/deploy-overtone.sh "$(COMPONENT)" "$(IMAGE)"
 
 build:
 	@$(COMPOSE) --profile $(PROFILE) build $(BUILD_FLAGS) $(BUILD_SERVICES)

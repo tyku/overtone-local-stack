@@ -3,14 +3,18 @@ import http from 'node:http';
 let requestReads = 0;
 
 const json = (response, status, body) => {
-  response.writeHead(status, { 'Content-Type': 'application/json' });
+  response.writeHead(status, {
+    'Content-Type': 'application/json',
+    'X-Overtone-API-Version': '1',
+    'X-Overtone-Supported-API-Versions': '1',
+  });
   response.end(JSON.stringify(body));
 };
 
 const server = http.createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://api');
   if (request.method === 'GET' && url.pathname === '/api/health') {
-    json(response, 200, { status: 'ok' });
+    json(response, 200, { status: 'ok', version: 'smoke' });
     return;
   }
 

@@ -16,8 +16,10 @@ make up
 make up                 # весь стек с mock inference
 make up-gpu             # весь стек с GPU inference
 make infra              # только PostgreSQL, Redis и MinIO
+make api                # API и необходимые инфраструктурные зависимости
 make app                # API, worker, frontend assets и Nginx
 make frontend           # пересобрать React assets и запустить Nginx
+make frontend-dev       # API в Docker + Vite/hot reload на хосте
 make smoke-overtone     # изолированный smoke: React → Nginx → mock API
 make logs               # логи всех сервисов
 make logs SERVICE=worker
@@ -57,8 +59,10 @@ Mock и GPU inference взаимоисключающие. `make up` и `make up-
 ## Frontend и Nginx
 
 React-приложение собирается внутри Docker сервисом `frontend-assets`. Это
-одноразовый контейнер: он очищает только named volume `frontend_dist`, копирует
-в него production build и успешно завершается. Постоянный сервис `nginx`
+одноразовый контейнер: он копирует новые hashed assets в named volume
+`frontend_dist`, атомарно заменяет `index.html` и успешно завершается. Старые
+hashed assets удаляются через 7 дней, поэтому уже открытая вкладка не получает
+404 во время обновления. Постоянный сервис `nginx`
 монтирует этот volume только для чтения, раздаёт SPA и проксирует `/api/*` в
 `api:3000`.
 
@@ -85,4 +89,50 @@ make smoke-overtone
 
 Для принудительного обновления assets в составе всего стека используйте
 `make up REBUILD=1` или `make up-gpu REBUILD=1`. Старые hashed assets удаляются
-из `frontend_dist` перед копированием новой сборки.
+после семидневного окна совместимости.
+
+## Режим разработки
+
+Для React-разработки с hot reload нужен установленный Node.js. Команда ниже
+поднимает API с его Compose-зависимостями, затем запускает Vite на порту 5173:
+
+```sh
+make frontend-dev
+```
+
+Vite проксирует `/api` на `http://127.0.0.1:3000`. Параметры можно изменить в
+`../overtone/frontend/.env.development`, взяв за основу
+`.env.development.example`. Production routing этим файлом не настраивается.
+
+## Release-образы
+
+`api`/`worker` и `frontend-assets` имеют независимые image references и не
+обязаны иметь одинаковый git SHA:
+
+```dotenv
+OVERTONE_BACKEND_IMAGE=registry/overtone-backend:<git-sha>
+OVERTONE_FRONTEND_IMAGE=registry/overtone-frontend-assets:<git-sha>
+```
+
+OCI label `org.opencontainers.image.revision` используется только для проверки,
+что immutable tag содержит ожидаемую сборку. API-совместимость проверяется в
+runtime через request/response header `X-Overtone-API-Version`, а не через
+Docker metadata.
+
+Для ручного развёртывания укажите только изменившийся компонент:
+
+```sh
+make deploy-overtone COMPONENT=frontend \
+  IMAGE=registry/overtone-frontend-assets:<frontend-git-sha>
+
+make deploy-overtone COMPONENT=backend \
+  IMAGE=registry/overtone-backend:<backend-git-sha>
+```
+
+Backend deployment перезапускает только `api`/`worker`, затем делает reload
+уже работающего Nginx, чтобы он заново разрешил Docker DNS имени `api`.
+Frontend и Nginx-контейнер при этом не пересоздаются.
+
+Перед первой такой выкладкой обновите сам `overtone-local-stack` на сервере:
+release-команда ожидает image-переменные, атомарный `frontend-assets` и новый
+Nginx readiness-check из этого репозитория.

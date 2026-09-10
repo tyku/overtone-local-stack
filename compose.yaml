@@ -81,10 +81,13 @@ services:
     restart: "no"
 
   api:
+    image: ${OVERTONE_BACKEND_IMAGE:-overtone-backend:local}
     build:
       context: ../overtone/backend
       dockerfile: Dockerfile
       target: backend
+      args:
+        APP_VERSION: ${OVERTONE_VERSION:-dev}
     restart: unless-stopped
     env_file: ../overtone/backend/.env
     environment: &overtone_environment
@@ -118,10 +121,13 @@ services:
       retries: 5
 
   frontend-assets:
+    image: ${OVERTONE_FRONTEND_IMAGE:-overtone-frontend-assets:local}
     build:
       context: ../overtone/frontend
       dockerfile: Dockerfile
       target: artifacts
+      args:
+        APP_VERSION: ${OVERTONE_VERSION:-dev}
     volumes:
       - frontend_dist:/output
     restart: "no"
@@ -133,6 +139,7 @@ services:
     volumes:
       - frontend_dist:/usr/share/nginx/html:ro
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/healthcheck.sh:/usr/local/bin/overtone-healthcheck:ro
     mem_limit: 64m
     cpus: 0.1
     depends_on:
@@ -141,17 +148,20 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: [CMD, wget, -qO-, http://127.0.0.1/nginx-health]
+      test: [CMD, sh, /usr/local/bin/overtone-healthcheck]
       interval: 15s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
   worker:
+    image: ${OVERTONE_BACKEND_IMAGE:-overtone-backend:local}
     build:
       context: ../overtone/backend
       dockerfile: Dockerfile
       target: backend
+      args:
+        APP_VERSION: ${OVERTONE_VERSION:-dev}
     command: [node, dist/worker/main.js]
     restart: unless-stopped
     stop_grace_period: 45s
