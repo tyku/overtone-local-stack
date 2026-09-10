@@ -18,6 +18,7 @@ make up-gpu             # весь стек с GPU inference
 make infra              # только PostgreSQL, Redis и MinIO
 make app                # API, worker, frontend assets и Nginx
 make frontend           # пересобрать React assets и запустить Nginx
+make smoke-overtone     # изолированный smoke: React → Nginx → mock API
 make logs               # логи всех сервисов
 make logs SERVICE=worker
 make ps
@@ -71,6 +72,15 @@ Nginx не входит во frontend-модуль. Его локальная in
 make frontend
 curl http://localhost:${FRONTEND_PORT:-8080}/nginx-health
 curl http://localhost:${FRONTEND_PORT:-8080}/api/health
+```
+
+Полный smoke-тест поднимает отдельный Compose-проект `overtone-smoke` на
+портах `18080/18081`, проверяет SPA fallback, cache headers, проксирование API
+и несколько циклов polling до готового отчёта, затем удаляет только свои
+контейнеры и временный volume:
+
+```sh
+make smoke-overtone
 ```
 
 Для принудительного обновления assets в составе всего стека используйте
